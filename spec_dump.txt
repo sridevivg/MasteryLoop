@@ -1,0 +1,533 @@
+Project 10 — MasteryLoop: Adaptive Assessment &
+Learning Intelligence Platform
+1. Project Title
+MasteryLoop — Knowledge-Tracing-Driven Adaptive Assessment, Psychometrically-Validated AI
+Item Generation, and Learning Analytics Platform
+2. Executive Summary
+MasteryLoop is an education-technology platform that models what each learner actually knows and uses
+that model to drive everything else. A deep knowledge-tracing model (transformer over learner
+interaction sequences, SAKT-style, PyTorch) estimates per-skill mastery in real time; an Item Response
+Theory (IRT) engine calibrates every question's difficulty and discrimination from response data; an
+adaptive assessment engine selects each next question by maximum information gain (shorter tests,
+better measurement); and a GenAI item-generation pipeline drafts new practice questions from
+curriculum content (RAG-grounded) — but, uniquely, every generated item passes through a psychometric
+validation lifecycle: automated quality checks, human review, a live pilot phase, and IRT-based statistical
+acceptance before it can affect any learner's score. An integrity layer (response-time and answer-pattern
+analytics) flags anomalous test-taking, and educator dashboards translate mastery data into actionable
+class-level insight.
+The innovation stack: knowledge tracing + IRT are almost never seen in student portfolios despite
+powering every serious assessment company (Duolingo, Riiid, Pearson), and the "generated items must
+earn their way into the item bank through measured statistics" loop is a genuinely industry-grade answer to
+the "LLMs write bad test questions" problem.
+Fully buildable with public data: the EdNet KT1 dataset (131M interactions, 780k learners) or ASSISTments
+2017 for knowledge tracing, with the platform's own item bank bootstrapped from open curriculum
+content (e.g., Khan Academy-style exercise structures re-authored).
+3. Industry Domain
+Education / EdTech (adaptive learning platforms, assessment providers, corporate skills training, test-prep).
+4. Problem Statement
+Education's core measurement instrument — the fixed quiz — is broken in well-documented ways. Every
+student answers the same questions, so strong students waste time on trivial items while struggling
+students face demoralizing walls; a 30-question test measures with the precision a 12-question adaptive
+test achieves; and the resulting single percentage score says nothing about which skills are weak, so
+teachers re-teach whole units blind. Content is an equal bottleneck: authoring one high-quality assessment
+---PAGE---
+item costs $50–300 (subject expert + editor + review), so item banks are small, over-exposed (answers
+circulate), and stale.
+The obvious "fix" — have an LLM generate thousands of questions — fails in practice and is why educators
+distrust AI content: generated items are frequently ambiguous, mis-keyed, off-curriculum, or of unknown
+difficulty, and deploying an uncalibrated item into a scored assessment corrupts the measurement. Existing
+adaptive platforms are closed, expensive, and give teachers no visibility into why the system claims a
+student is struggling.
+MasteryLoop solves the measurement problem with knowledge tracing + IRT + adaptive selection, and
+solves the content problem by treating generation as the start of a validation pipeline, not the end: items
+are drafted cheaply by AI, screened automatically, reviewed by humans, piloted on real (unscored) traffic,
+calibrated statistically, and only then admitted to the scored bank — with every step recorded.
+5. Business Objectives
+1. Knowledge tracing: next-response prediction AUC ≥ 0.77 on the EdNet/ASSISTments test split
+(published-baseline-competitive), beating a Bayesian-KT baseline by ≥ 4 points.
+2. Adaptive efficiency: reach equivalent mastery-estimate precision with ≥ 40% fewer questions than fixed-
+form tests (measured by simulation on held-out learners).
+3. IRT calibration: item parameter recovery within acceptable error on synthetic learners (validated harness)
+and stable parameters (drift < threshold) on real replay.
+4. Item generation: ≥ 60% of AI-drafted items survive automated screening; ≥ 70% of piloted items pass
+statistical acceptance; zero unvalidated items ever affect a scored assessment (enforced by design).
+5. Integrity: ≥ 85% recall of injected anomalous-behavior patterns (mass rapid-guessing, answer-copying
+pairs) at ≤ 3% false-flag rate.
+6. Educator value: class dashboard identifies the weakest 3 skills per class with actionable evidence; time-
+to-insight < 5 seconds.
+6. Target Users
+Learners / students — adaptive practice and assessments, transparent mastery map, personalized
+review queues.
+Educators — class mastery dashboards, skill-gap evidence, assessment assignment, item-review
+participation.
+Content authors / subject-matter experts — item authoring studio, AI-draft review queues,
+curriculum mapping.
+Psychometricians / assessment leads — calibration dashboards, item-lifecycle management, integrity
+reports.
+ML engineers (you) — KT model, IRT pipelines, generation/validation loop, monitoring.
+7. Complete Functional Requirements
+Curriculum, items, and learners - FR-1: Skill graph: curriculum modeled as skills with prerequisite edges
+(DAG, validated acyclic); every item maps to 1–3 skills. - FR-2: Item bank: items (stem, options, key, rationale,
+skills, media refs) with a lifecycle state machine: draft → screened → in_review → pilot → calibrating →
+---PAGE---
+active → retired/rejected ; transitions audited; only active  items affect scores. - FR-3: Learner registry with
+cohort/class membership; interaction events (item shown, response, latency, hints) captured to an append-
+only interaction store — the KT training feed. - FR-3b: Interaction event bus: every response is published
+to a Redis stream; independent consumer groups fan out to (a) the KT updater (mastery refresh < 300 ms),
+(b) live educator dashboards, and (c) the integrity scanner — capture is decoupled from consumers, so a
+slow or failed consumer can never block or lose learner interactions (event-driven ingestion, the way
+production adaptive platforms are built). - FR-4: EdNet/ASSISTments ETL (DVC-staged) maps the public
+dataset onto the platform schema for model training and replay evaluation.
+Knowledge tracing & IRT - FR-5: Deep KT model (SAKT-style transformer over interaction sequences)
+serves per-learner, per-skill mastery estimates updated after every response; Bayesian-KT (BKT) baseline
+maintained for comparison. - FR-6: IRT engine: 2PL model (difficulty b, discrimination a) fit per item from
+response matrices (batch job); parameter history versioned; misfit detection (items whose responses
+contradict the model) flags review. - FR-7: Mastery API: per-learner skill map with confidence, trajectory
+over time, and prerequisite-aware "readiness" per skill.
+Adaptive assessment engine - FR-8: Adaptive sessions: next item selected by maximum Fisher information
+at the learner's current ability estimate, subject to constraints (skill coverage targets, exposure control so
+items don't over-circulate, content balance); stopping rule = standard-error threshold or item cap. - FR-9:
+Fixed-form mode retained for A/B comparison; both produce skill-level score reports. - FR-10: Practice
+mode: spaced-repetition review queues driven by mastery decay predictions.
+GenAI item factory (the validation lifecycle) - FR-11: Generation: RAG over curriculum content (Qdrant)
+grounds the LLM; prompts specify skill, target difficulty band, item template, and distractor requirements;
+output is structured JSON (stem, options, key, rationale, skill tags, source citations). - FR-12: Automated
+screening: key-verifiability check (a solver pass must derive the keyed answer independently), distractor
+plausibility/duplication checks, reading-level check, curriculum-grounding check (citations must resolve),
+near-duplicate detection against the bank (embedding similarity). - FR-13: Human review queue: SMEs
+approve/edit/reject with structured reasons; edits versioned. - FR-14: Pilot phase: approved items served
+unscored alongside real assessments (invisible to learners); after N responses, IRT calibration runs; statistical
+acceptance rules (discrimination ≥ threshold, difficulty in target band, no key-error signal from point-
+biserial) promote to active  or send back with diagnostics. - FR-15: Full lineage: every active item records
+its origin (human/AI), prompts, screening scores, review history, and calibration evidence.
+Integrity & analytics - FR-16: Integrity analytics per session: rapid-guessing detection (response-time vs.
+item-difficulty modeling), unusual accuracy jumps, answer-pattern similarity between learner pairs on
+shared items; flags open review cases for educators — advisory, never auto-punitive. - FR-17: Educator
+dashboards: class skill heatmap, weakest-skills ranking with evidence (items, common wrong answers),
+learner trajectories, assessment reports; item-bank health (exposure, aging, calibration drift) for assessment
+leads. - FR-18: JWT auth, roles (learner, educator, author, psychometrician, admin); class-scoped access;
+audit log; Prometheus metrics.
+8. Non-Functional Requirements
+Performance: next-item selection < 200 ms (precomputed information tables + cached ability); mastery
+update < 300 ms post-response; dashboards < 5 s on 100k-interaction classes.
+---PAGE---
+Scalability: stateless APIs; KT inference batched on a worker pool; interaction store partitioned; EdNet-
+scale training via chunked datasets (PyArrow).
+Reliability/Fault tolerance: interaction capture is append-only and never blocked by model availability
+(KT outage degrades to IRT-only ability estimates, flagged); pilot assignment idempotent; jobs
+checkpointed; sessions resume from persisted per-response state after a crash.
+Security/Privacy: learner data minimization; class-scoped RBAC; minors-appropriate design (no PII
+beyond necessity, documented); integrity flags visible only to educators/leads.
+Maintainability: psychometric logic in a pure library with statistical validation harnesses; item lifecycle
+as an explicit state machine; ADRs.
+Monitoring/Logging: prediction-quality tracking (rolling AUC on incoming responses), calibration drift,
+exposure rates, generation-funnel conversion metrics; structured logs; /health  + /metrics .
+Availability: compose restart policies; assessment sessions resilient to service restarts (session state
+persisted per response).
+9. System Architecture
+ Learner apps (Streamlit) ──► Assessment API ──► PostgreSQL (items, sessions,
+        │ practice / adaptive test              interactions append-only, mastery)
+        ▼                                              │
+ Adaptive Engine (Fisher information + constraints + exposure control)
+        │ ability updates                              │
+        ▼                                              ▼
+ KT Service (SAKT transformer, MLflow)      IRT Batch Engine (2PL fits, misfit detection)
+        │ per-skill mastery                            │ parameter history
+        └──────────────► Mastery API ◄─────────────────┘
+                                │
+ Item Factory: LLM draft (RAG over curriculum, Qdrant) → automated screening
+   → SME review queue → unscored pilot → IRT acceptance → active bank
+                                │ full lineage per item
+ Integrity Analytics (response-time + pattern models) ──► review cases (advisory)
+                                │
+ Educator/Psychometrician Console (React): class heatmaps, item lifecycle,
+ calibration dashboards, review queues · MLflow/DVC · audit log
+10. Complete Folder Structure
+masteryloop/
+├── README.md
+├── docker-compose.yml               # postgres, redis, qdrant, mlflow, services, frontends
+├── Makefile                         # up / seed / replay / train / test / simulate
+├── .env.example
+├── .pre-commit-config.yaml
+├── .github/workflows/ci.yml         # lint, tests, psychometric + KT eval gates, build
+├── dvc.yaml / params.yaml
+├── data/                            # DVC: ednet/, assistments/, curriculum/, item_seed/
+├── docs/
+│   ├── architecture.md
+│   ├── adr/0001-irt-gate-for-generated-items.md
+│   ├── adr/0002-kt-plus-irt-hybrid.md
+│   ├── psychometrics_primer.md      # IRT, information, adaptive testing explained
+│   └── runbook.md
+---PAGE---
+├── libs/
+│   └── psychocore/                  # pure psychometrics library, statistically validated
+│       ├── pyproject.toml
+│       └── src/psychocore/
+│           ├── irt.py               # 2PL likelihood, EM fitting, ability estimation (MLE/EAP)
+│           ├── information.py       # item/test information functions
+│           ├── selection.py         # max-info selection + exposure + coverage constraints
+│           ├── stopping.py          # SE-threshold and item-cap stopping rules
+│           ├── acceptance.py        # pilot acceptance rules (a/b bands, point-biserial)
+│           └── simulate.py          # synthetic learner/response generators for validation
+├── services/
+│   ├── assessment/
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/assessment/
+│   │       ├── main.py              # session APIs: start, next-item, respond, report
+│   │       ├── config.py
+│   │       ├── engine.py            # adaptive loop wiring psychocore + ability cache
+│   │       ├── sessions.py          # persisted per-response session state
+│   │       ├── pilot_mixer.py       # unscored pilot-item interleaving
+│   │       ├── practice.py          # spaced-repetition queue logic
+│   │       ├── event_bus.py         # publishes each response to the Redis interaction stream
+│   │       └── schemas.py
+│   ├── kt/
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/kt_svc/ (main.py, model.py, updater.py, consumer.py, schemas.py)
+│   │                                # SAKT inference; consumer.py reads the interaction stream (consumer group) → mas
+│   ├── irt_jobs/
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/irt_jobs/ (calibrate.py, misfit.py, acceptance_runner.py, drift.py)
+│   ├── item_factory/
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/item_factory/
+│   │       ├── main.py              # generation + lifecycle APIs
+│   │       ├── generate.py          # RAG-grounded structured item drafting
+│   │       ├── screening/
+│   │       │   ├── solver_check.py  # independent solve-the-item key verification
+│   │       │   ├── distractors.py   # plausibility, duplication, "all of the above" bans
+│   │       │   ├── readability.py   # reading-level scoring
+│   │       │   ├── grounding.py     # citation resolution vs curriculum chunks
+│   │       │   └── dedupe.py        # embedding near-duplicate vs item bank
+│   │       ├── lifecycle.py         # state machine + transition audit
+│   │       ├── rag/ (ingest_curriculum.py, retriever.py)   # curriculum → Qdrant
+│   │       └── evaluation/ (golden_items.jsonl, evaluate.py)
+│   ├── integrity/
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/integrity/ (main.py, rapid_guess.py, similarity.py, cases.py)
+│   ├── api/                         # gateway: auth, learners, classes, dashboards, mastery
+---PAGE---
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/masteryloop_api/ (main.py, auth/, routes/, schemas.py, db/, audit.py)
+│   ├── learner_app/                 # Streamlit learner experience
+│   │   ├── Dockerfile / pyproject.toml
+│   │   └── src/learner_app/ (app.py, pages/ practice.py, test.py, mastery_map.py)
+│   └── frontend/                    # React educator/psychometrician console
+│       ├── Dockerfile / package.json / vite.config.ts
+│       └── src/
+│           ├── App.tsx / api/client.ts
+│           ├── pages/ (ClassDashboard.tsx, LearnerDetail.tsx, ItemStudio.tsx,
+│           │          ReviewQueue.tsx, CalibrationLab.tsx, IntegrityCases.tsx, ModelOps.tsx)
+│           └── components/ (SkillHeatmap.tsx, MasteryTrajectory.tsx, ItemLifecycleBadge.tsx,
+│                            InfoCurve.tsx, FunnelChart.tsx, EvidencePanel.tsx)
+├── ml/
+│   ├── pyproject.toml
+│   └── src/masteryloop_ml/
+│       ├── data/ (prepare_ednet.py, sequences.py, splits.py)   # leakage-safe learner splits
+│       ├── kt/ (sakt.py, train.py, evaluate.py, bkt_baseline.py, export.py)
+│       ├── simulation/adaptive_sim.py  # fixed vs adaptive precision comparison
+│       └── monitoring/ (rolling_auc.py, calibration_drift.py)
+├── db/migrations/… ; db/seed/seed.py # skill graph, seed items, demo classes, users
+└── tests/
+    ├── unit/                        # psychocore vs closed-form cases, lifecycle machine,
+    │                                #   screening checks, exposure control
+    ├── integration/                 # session flow, pilot mixing, calibration round trip
+    ├── api/                         # contract + class-scoped RBAC matrix
+    └── e2e/test_item_journey.py     # AI draft → screen → review → pilot → active → served
+11. File-by-File Explanation (by module)
+libs/psychocore/ — the platform's credibility: irt.py  implements 2PL likelihood and EM fitting
+validated against closed-form/synthetic cases in simulate.py  (parameter-recovery tests are the unit
+tests — fit on synthetic learners with known a,b, assert recovery error bounds);
+information.py / selection.py  implement Fisher information and constrained max-info selection with
+exposure control (item-usage caps); acceptance.py  encodes the statistical gate generated items must
+pass.
+assessment/engine.py + sessions.py — the adaptive loop: estimate ability (EAP) → select next item
+under constraints → record response → update; session state persisted every response so a crashed
+service resumes mid-test; pilot_mixer.py  interleaves unscored pilot items (invisible flag) at a capped
+rate.
+assessment/event_bus.py + kt/consumer.py — the event-driven backbone: every response is
+published to a Redis stream by event_bus.py ; independent consumer groups ( kt/consumer.py , the
+dashboard feeder, the integrity scanner) read it at their own pace, so capture is fully decoupled from
+processing — a slow or crashed consumer never blocks or loses an interaction. This is the difference
+between a toy that updates inline and a platform that survives load.
+---PAGE---
+kt/updater.py — invoked by the consumer: appends to the learner sequence and refreshes cached
+mastery; KT and IRT ability estimates are both stored — the hybrid (KT for skill-level mastery/practice,
+IRT for scored-test ability) is ADR-0002 and a great interview topic.
+item_factory/screening/solver_check.py — the anti-mis-key gate: a separate LLM pass solves the item
+blind (no key shown); disagreement with the key fails screening; agreement is recorded as evidence.
+Cheap, effective, and demonstrably reduces the worst generation failure.
+item_factory/lifecycle.py — the explicit state machine with transition guards (only calibrating→active
+via acceptance_runner.py  results; only psychometrician role can force-retire); every transition audited —
+the "zero unvalidated items in scored tests" guarantee lives here, in code.
+integrity/rapid_guess.py + similarity.py — response-time mixture modeling (solution behavior vs.
+guessing behavior per item) and pairwise answer-vector similarity with shared-item normalization;
+outputs advisory cases with evidence, never automatic penalties.
+ml/simulation/adaptive_sim.py — replays held-out learners through fixed vs. adaptive modes and
+produces the "40% fewer questions at equal precision" evidence chart used on the dashboard and in
+the README.
+frontend/CalibrationLab.tsx — item parameter scatter (a vs b), information curves, misfit flags, pilot
+funnel — the psychometrician cockpit; SkillHeatmap.tsx  is the educator's class view with drill-through
+to evidence.
+12. Database Design
+PostgreSQL
+skills : id UUID PK , name , subject , description ; skill_edges : prereq_id FK , skill_id FK , PK both
+(DAG, acyclicity enforced in application + test).
+items : id UUID PK , stem_md TEXT , options JSONB , key CHAR(1) , rationale_md TEXT , skill_ids UUID[] ,
+state ENUM(draft,screened,in_review,pilot,calibrating,active,retired,rejected) , origin
+ENUM(human,ai) , lineage JSONB (prompt id, screening scores, review ids) , a REAL NULL , b REAL NULL ,
+param_version INT , exposure_count INT , created_at ; index (state) , (skill_ids)  GIN.
+item_param_history : item_id FK , version INT , a REAL , b REAL , n_responses INT , point_biserial REAL ,
+fitted_at ; PK (item_id, version) .
+learners : id UUID PK , display_name , cohort , created_at ; classes : id UUID PK , name , educator_id FK
+users ; enrollments : (class_id, learner_id)  PK.
+interactions  (append-only, monthly partitions): id BIGSERIAL , learner_id FK , item_id FK , session_id
+FK NULL , shown_at , responded_at , response CHAR(1) NULL , correct BOOL NULL , latency_ms INT , scored
+BOOL , pilot BOOL ; indexes (learner_id, shown_at) , (item_id) .
+sessions : id UUID PK , learner_id FK , kind ENUM(adaptive,fixed,practice) , state JSONB (ability, se,
+asked[], constraints) , status ENUM(active,completed,abandoned) , report JSONB NULL , started_at ,
+ended_at NULL .
+mastery : learner_id FK , skill_id FK , estimate REAL , confidence REAL , updated_at , model_version ; PK
+(learner_id, skill_id) .
+review_actions : id , item_id FK , reviewer_id FK users , action ENUM(approve,edit,reject) , reason ,
+diff JSONB NULL , at .
+integrity_cases : id UUID PK , kind ENUM(rapid_guessing,similarity,accuracy_jump) , learner_ids UUID[] ,
+session_ids UUID[] , evidence JSONB , status ENUM(open,reviewed,dismissed) , reviewed_by FK NULL .
+---PAGE---
+users , audit_log .
+ER summary: skills form a DAG via skill_edges and tag items (N–N); items 1–N param-history versions and
+1–N review_actions; learners N–N classes via enrollments; learners 1–N interactions, sessions, and mastery
+rows (per skill); sessions 1–N interactions; integrity_cases reference learners/sessions; users
+(educators/reviewers) 1–N review actions, cases, audit entries. Qdrant: curriculum  (content chunks) and
+item_embeddings  (dedupe). Redis: interaction event stream with consumer groups (KT updater, live
+dashboards, integrity scanner), ability/mastery cache, session locks, job queues.
+13. Data Flow
+1. EdNet/ASSISTments ETL bootstraps interaction history; seed items + curriculum load; KT trains offline
+(DVC → MLflow).
+2. Learner starts an adaptive session → engine estimates ability → selects max-info item (constraints +
+exposure) → learner responds → interaction appended → KT mastery + IRT ability update → repeat until
+stopping rule → skill-level report.
+3. In parallel, pilot_mixer  interleaves unscored pilot items; their responses accumulate for calibration.
+4. Item factory: author or scheduled job requests drafts for under-covered skills → RAG-grounded
+generation → automated screening (solver check, distractors, readability, grounding, dedupe) → SME
+review queue → approved items enter pilot → acceptance_runner  fits IRT after N responses → promote
+to active  (or bounce with diagnostics); lineage recorded end-to-end.
+5. Integrity jobs scan completed sessions; flagged cases go to educator review (advisory).
+6. Nightly: IRT recalibration + misfit detection; rolling-AUC monitoring of KT predictions on incoming
+responses; drift alerts trigger retraining with eval gates.
+7. Dashboards read mastery, calibration, funnel, and integrity aggregates; educator actions (assignments,
+reviews) audited.
+Scenario walkthrough: Learner Maya starts an adaptive algebra test. Her third correct answer pushes the
+ability estimate up; the engine responds with a harder, more informative item. After 11 questions the
+standard error crosses the stopping threshold — the test ends, where the old fixed form would have made
+her sit through 30. Her mastery map shows one clear gap: fraction division. Meanwhile, in the item factory,
+AI-drafted item #4821 has passed the blind solver check and SME review and has been running as an
+unscored pilot inside real tests; tonight's calibration shows discrimination 0.9, difficulty on-target, point-
+biserial healthy — it's promoted to the active bank, having statistically earned its place. Her teacher's
+dashboard shows the class heatmap the next morning: fraction division is weak for 14 of 28 students, with
+the exact items and common wrong answers as evidence.
+14. AI Pipeline
+Ingestion/validation: interaction append-only capture with schema validation; dataset ETL with
+learner-level dedup and timestamp sanity.
+Feature/representation: interaction sequences (item, skill, correctness, latency) windowed per learner;
+leakage-safe learner-level splits (no learner in both train and test).
+Training: SAKT transformer (masked attention over past interactions) vs. BKT baseline; hyperparameters
+in params.yaml ; MLflow-tracked; ONNX export for serving.
+---PAGE---
+Evaluation: next-response AUC/accuracy (headline, CI-gated), calibration of predicted probabilities,
+per-skill breakdown; IRT parameter-recovery harness on synthetic data (CI-gated — statistical code is
+tested statistically); adaptive-vs-fixed simulation report.
+Deployment: registry promotion; KT service pins versions; mastery rows record model version.
+Monitoring/feedback: rolling AUC on live responses, item calibration drift, exposure balance,
+generation-funnel conversion; every learner response is new training data — scheduled retraining with
+gates.
+15. Agentic AI Workflow
+Deliberately scoped: a 3-node item-drafting agent plus the human lifecycle (education is a domain where
+autonomy must be earned):
+Nodes: curriculum_grounder  (retrieves skill-relevant content chunks) → item_drafter  (structured JSON
+item with citations, difficulty-band targeting, distractor rationale) → self_critic  (checks the item
+against a rubric: single defensible key, no cue-in-stem, distractors from documented misconceptions;
+revises once).
+Then the pipeline is deterministic + human: screening checks → SME review → pilot → statistical
+acceptance — the agent proposes, the process disposes.
+Memory: rejected-item reasons embedded and retrieved during drafting ("avoid: ambiguous 'best
+answer' phrasing rejected 12 times for this skill") — the factory learns from its rejections.
+Recovery/HITL: generation failures simply produce no draft; nothing in the learner-facing path
+depends on the LLM; humans gate every lifecycle promotion until the statistical gate takes over.
+MCP interface: the learning-intelligence tools (mastery lookups, skill-graph queries, item-bank search,
+calibration reports) are additionally exposed through a Model Context Protocol (MCP) server with
+class/learner scoping enforced per call, so educator-facing LLM assistants can ask "which prerequisite skills
+block my weakest students?" through the same governed, privacy-scoped tool layer.
+16. Generative AI Workflow
+Corpus: curriculum content (concept explanations, worked examples, documented misconceptions per
+skill) — heading-aware chunks with {skill_id, content_type}  metadata in Qdrant.
+Retrieval: dense + keyword hybrid filtered by skill, top-6 → rerank → top-3 chunks per draft.
+Prompt flow: versioned prompt templates per item type (MCQ, numeric, cloze); structured-output
+schema enforced; distractors must cite a misconception chunk or state the error pattern they represent.
+Hallucination mitigation (layered): citation resolution check, blind solver check (independent LLM
+pass must derive the key), near-duplicate rejection, SME review, and the ultimate gate — live IRT
+statistics (a mis-keyed item shows negative point-biserial and is caught even if everything upstream
+missed it).
+Evaluation: golden item set scored against the rubric; funnel metrics (screen-pass %, review-pass %,
+pilot-acceptance %) tracked per prompt version — prompt changes are evaluated like model changes;
+CI runs the screening suite on fixture drafts.
+17. APIs
+---PAGE---
+Endpoint Method Request Response Auth
+/api/v1/auth/login POST credentials JWT none
+/api/v1/sessions POST {kind,
+skill_scope}
+{session_id,
+first_item}
+learner
+/api/v1/sessions/{id}/respond POST {item_id,
+response,
+latency_ms}
+{correct?,
+next_item |
+report}
+learner (own)
+/api/v1/learners/{id}/mastery GET — skill map +
+confidence +
+trajectory
+learner(own)/educator
+/api/v1/learners/{id}/practice-
+queue
+GET — spaced-
+repetition items
+learner
+/api/v1/classes/{id}/dashboard GET — heatmap,
+weakest skills +
+evidence
+educator (own class)
+/api/v1/items GET/POST filters / authored item bank view / draft author+
+/api/v1/items/generate POST {skill_id, count,
+difficulty_band}
+draft ids author+
+/api/v1/items/{id}/review POST {action, reason,
+edits?}
+lifecycle
+transition
+author/SME
+/api/v1/items/{id}/lineage GET — full origin +
+validation history
+psychometrician
+/api/v1/calibration/report GET ?subject= params, misfits,
+drift
+psychometrician
+/api/v1/integrity/cases GET/POST
+review
+?status= cases + evidence educator+
+/api/v1/models GET — KT/IRT versions +
+metrics
+admin
+/health , /metrics GET — probes /
+Prometheus
+none
+Every listed resource also exposes the standard REST variants (GET by id, PUT, DELETE where the role
+permits); the complete, always-current contract is the auto-generated OpenAPI spec served at /docs  on
+each service.
+18. Security Design
+AuthN/AuthZ: JWT + roles; learners access only their own data; educators only their classes; item
+keys/rationales never exposed through learner-facing endpoints (response payloads audited by a
+serializer test); RBAC matrix CI-tested.
+Privacy (minors-aware): data minimization (display name + cohort only), no behavioral data exposed
+beyond educational purpose, integrity evidence visible only to educator/lead roles, retention policy
+---PAGE---
+documented; interaction exports role-gated and audited.
+Content integrity: item bank changes only via the audited lifecycle; scored/pilot flags immutable on
+interactions; answer keys encrypted at rest.
+Input validation: pydantic; response-payload constraints; rate limiting on session endpoints (mass-
+harvesting protection).
+Secrets: env-based; CI secret store.
+19. Testing Strategy
+Unit: psychocore against closed-form and synthetic-recovery cases (statistical unit tests); lifecycle state
+machine (illegal transitions rejected); exposure control; screening checks with fixture items (including
+deliberately mis-keyed ones); spaced-repetition scheduling.
+Integration: full session flow with pilot mixing; calibration round trip (responses → parameters →
+acceptance); KT update path; key-leak serializer test.
+API: contract + class/learner-scoped RBAC matrix.
+AI evaluation (CI-gated): KT AUC floor vs. BKT baseline; IRT parameter-recovery bounds; adaptive-vs-
+fixed simulation report; screening suite on golden drafts; integrity detectors on injected-anomaly
+fixtures.
+Performance: next-item latency p95 < 200 ms under 200 concurrent sessions (Locust); dashboard
+query budgets.
+E2E: the item journey — AI draft → screen → review → pilot → statistical acceptance → served in an
+adaptive session — in compose.
+20. Deployment Strategy
+make up && make seed && make replay  boots the stack, loads the skill graph + seed bank, replays a dataset
+slice to populate mastery, and simulates learners so dashboards are alive immediately. CI: lint → unit (incl.
+statistical harnesses) → integration → eval gates → images to GHCR. KT retraining scheduled with gate-
+checked promotion; IRT recalibration nightly with drift reports. Prod-like: compose behind Caddy TLS;
+documented scale mapping (read replicas, worker pools, per-tenant schemas) as an architecture exercise.
+21. Skills Learned
+Psychometrics engineering (IRT 2PL fitting, Fisher information, adaptive testing, exposure control) — a
+genuinely rare skill set; deep knowledge tracing (transformer sequence models) with leakage-safe
+evaluation; statistical validation of statistical code (parameter-recovery testing); lifecycle/state-machine
+product design; RAG-grounded structured generation with layered validation (solver checks, statistical
+acceptance); response-time behavioral modeling; append-only event architecture; education-grade privacy
+design; simulation-based product evidence; React + FastAPI + Streamlit; MLflow/DVC/CI.
+22. Key Technical Achievements
+"Built an adaptive assessment platform: SAKT knowledge tracing (AUC ≥ 0.77 on EdNet) + 2PL IRT
+calibration + max-information item selection, reaching equal precision with 40% fewer questions."
+---PAGE---
+"Designed a psychometrically-gated AI item factory: RAG-grounded drafting → blind solver verification
+→ SME review → unscored pilot → statistical acceptance — zero unvalidated items in scored tests, by
+construction."
+"Implemented integrity analytics (response-time mixture models, answer-similarity detection) with
+advisory-only case workflows."
+"Validated statistical code statistically: CI-gated IRT parameter-recovery harnesses on synthetic learners."
+23. Standout Engineering Capabilities
+1. Knowledge tracing + IRT together — the actual architecture of Duolingo/Riiid-class products,
+essentially absent from student portfolios; explaining Fisher-information item selection is a memorable
+interview moment.
+2. The item lifecycle gate — "an LLM can draft questions, but only measured statistics can admit them to
+a scored test" is a complete, defensible answer to AI-content skepticism.
+3. Blind solver check — a second model must independently derive the answer key; simple, clever, and
+demonstrably kills the worst failure mode.
+4. Statistical code tested statistically — parameter-recovery CI gates show scientific rigor most
+engineers never exhibit.
+5. A live demo with two audiences — a learner taking a visibly-adapting test, and an educator watching
+the class heatmap update: business value in 90 seconds.
+24. Future Enhancements
+Multidimensional IRT (skills measured jointly); learning-path recommendation over the skill DAG (bandit-
+based sequencing); open-response items with rubric-based LLM scoring + calibration; proctoring-free
+remote-assessment trust models; content localization pipeline; teacher-authored item co-pilot; longitudinal
+growth modeling; LTI integration with LMS platforms.
+Appendix — Key Concepts Explained
+Knowledge tracing (SAKT) — a transformer over a learner's answer history that predicts the
+probability they answer the next question correctly — a live, per-skill model of what they know.
+IRT 2PL — Item Response Theory with two parameters per question: difficulty (b) and discrimination (a,
+how sharply it separates strong from weak learners), fitted from real response data.
+Fisher information — how much a question measures at a learner's current ability; adaptive tests
+always ask the most informative next question.
+Stopping rule — the test ends when the ability estimate's standard error drops below threshold —
+precision-based, which is why 11 adaptive questions can equal 30 fixed ones.
+Point-biserial — the correlation between getting an item right and overall ability; a negative value
+screams "mis-keyed item" and is caught automatically in the pilot phase.
+Exposure control — capping how often each question is served so the bank doesn't leak through
+repetition.
+Blind solver check — a second model must independently derive the answer key without seeing it;
+disagreement kills the draft — the cheapest, most effective mis-key filter.
+---PAGE---
+Statistically-gated content — AI-drafted items must survive screening, human review, an unscored live
+pilot, and IRT acceptance before ever affecting a score; the lifecycle state machine enforces this in code.
+Parameter-recovery testing — validating statistical code by fitting synthetic learners with known
+parameters and asserting the fit recovers them; statistics tested statistically, in CI.
+Leakage-safe splits — train/test split by learner, never by row, so the model is always evaluated on
+people it has never seen.
+MCP (Model Context Protocol) — an open standard for exposing tools to LLM clients; learning-
+intelligence tools are served over MCP with class/learner privacy scoping.
+Milestone Plan
+Milestone Deliverables
+M1 Repo + compose, EdNet/ASSISTments ETL (DVC), skill graph + item bank + append-only interaction store,
+seed content
+M2 psychocore (IRT fitting, information, selection, stopping) + parameter-recovery test harness; calibration batch
+jobs
+M3 SAKT training + BKT baseline + leakage-safe eval; KT service + mastery API + post-response updates
+M4 Adaptive engine (constraints, exposure, stopping) + session persistence + reports; learner app; adaptive-vs-
+fixed simulation
+M5 Item factory: RAG generation, screening suite (solver check, dedupe…), review queue, pilot mixing, statistical
+acceptance; lineage
+M6 Integrity analytics + cases, educator/psychometrician console, rolling-AUC + drift monitoring, CI gates,
+privacy/security pass, docs + demo
